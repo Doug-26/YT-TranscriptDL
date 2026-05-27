@@ -1,0 +1,31 @@
+{
+  "name": "yt-transcript-extension",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chrome extension that adds a Download button to YouTube's transcript panel and saves transcripts as clean .txt files (no timestamps).",
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "icons": "node scripts/generate-icons.mjs",
+    "build:popup": "ng build",
+    "build:scripts": "node esbuild.config.mjs",
+    "copy:assets": "node scripts/copy-assets.mjs",
+    "build": "npm run clean && npm run icons && npm run build:popup && npm run build:scripts && npm run copy:assets"
+  },
+  "dependencies": {
+    "@angular/common": "^21.0.0",
+    "@angular/compiler": "^21.0.0",
+    "@angular/core": "^21.0.0",
+    "@angular/platform-browser": "^21.0.0",
+    "rxjs": "^7.8.2",
+    "tslib": "^2.8.0"
+  },
+  "devDependencies": {
+    "@angular/build": "^21.0.0",
+    "@angular/cli": "^21.0.0",
+    "@angular/compiler-cli": "^21.0.0",
+    "@types/chrome": "^0.0.287",
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.24.0",
+    "typescript": "~5.9.0"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/scripts",
+    "types": ["chrome"],
+    "noEmit": true
+  },
+  "include": [
+    "src/content/**/*.ts",
+    "src/background/**/*.ts"
+  ]
+}

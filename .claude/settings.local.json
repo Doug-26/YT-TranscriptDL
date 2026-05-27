@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(JSON.parse\\(require\\('fs'\\).readFileSync\\('dist/extension/manifest.json','utf8'\\)\\), null, 2\\)\\)\")"
+    ]
+  }
+}

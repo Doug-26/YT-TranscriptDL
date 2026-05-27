@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Transcript Downloader",
+  "version": "1.0.0",
+  "description": "Adds a Download button to YouTube's transcript panel — saves transcripts as clean .txt files (no timestamps).",
+  "action": {
+    "default_popup": "popup/index.html",
+    "default_title": "Download YouTube Transcript",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content/content.js"],
+      "css": ["content/content.css"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "host_permissions": ["https://www.youtube.com/*"]
+}
