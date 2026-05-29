@@ -1,23 +1,31 @@
-.ytx-download-btn {
+/* ─── Split-button group ─────────────────────────────────────────────── */
+.ytx-dl-group {
+  position: relative;
   display: inline-flex;
   align-items: center;
   align-self: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 14px;
-  margin: 0 8px 0 auto;
-  box-sizing: border-box;
   flex-shrink: 0;
   vertical-align: middle;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  height: 32px;
+  margin: 0 4px;
   font-family: "YouTube Sans", "Roboto", "Arial", sans-serif;
   font-size: 13px;
-  font-weight: 500;
   line-height: 1;
   letter-spacing: 0.15px;
+}
+
+.ytx-dl-main,
+.ytx-dl-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font: inherit;
+  font-weight: 500;
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
@@ -25,56 +33,150 @@
     color 120ms ease, transform 120ms ease;
 }
 
-.ytx-download-btn:hover {
+.ytx-dl-main {
+  gap: 6px;
+  padding: 0 12px;
+  border-radius: 16px 0 0 16px;
+  border-right-width: 0;
+}
+
+.ytx-dl-chevron {
+  width: 28px;
+  padding: 0;
+  border-radius: 0 16px 16px 0;
+}
+
+.ytx-dl-main:hover:not(:disabled),
+.ytx-dl-chevron:hover:not(:disabled) {
   background: #cc0000;
   border-color: transparent;
   color: #fff;
 }
-
-.ytx-download-btn:active {
+.ytx-dl-main:active:not(:disabled),
+.ytx-dl-chevron:active:not(:disabled) {
   transform: translateY(1px);
 }
-
-.ytx-download-btn:focus-visible {
+.ytx-dl-main:focus-visible,
+.ytx-dl-chevron:focus-visible {
   outline: 2px solid #3ea6ff;
   outline-offset: 2px;
+  position: relative;
+  z-index: 1;
 }
-
-.ytx-download-btn:disabled {
+.ytx-dl-main:disabled,
+.ytx-dl-chevron:disabled {
   cursor: default;
   opacity: 0.85;
 }
 
-.ytx-download-btn--success {
+.ytx-dl-group--success .ytx-dl-main,
+.ytx-dl-group--success .ytx-dl-chevron {
   background: #2ea043;
   border-color: transparent;
   color: #fff;
 }
-
-.ytx-download-btn--error {
+.ytx-dl-group--error .ytx-dl-main,
+.ytx-dl-group--error .ytx-dl-chevron {
   background: #4a4a4a;
   border-color: transparent;
   color: #fff;
 }
-
-.ytx-download-btn svg {
-  flex-shrink: 0;
+.ytx-dl-group--busy .ytx-dl-main {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
 }
 
-.ytx-download-btn__label {
+.ytx-dl-main svg,
+.ytx-dl-chevron svg {
+  flex-shrink: 0;
+}
+.ytx-dl-label {
   display: inline-block;
 }
 
+/* ─── Dropdown menu ──────────────────────────────────────────────────── */
+.ytx-dl-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 2200;
+  min-width: 220px;
+  padding: 6px;
+  background: #282828;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ytx-dl-menu[hidden] {
+  display: none;
+}
+
+.ytx-dl-menu__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 100ms ease;
+}
+
+.ytx-dl-menu__item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.ytx-dl-menu__item:focus-visible {
+  outline: 2px solid #3ea6ff;
+  outline-offset: -2px;
+}
+
+.ytx-dl-menu__label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.ytx-dl-menu__sub {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  letter-spacing: 0.2px;
+}
+
+/* ─── Light theme overrides ──────────────────────────────────────────── */
 @media (prefers-color-scheme: light) {
-  html:not([dark]) .ytx-download-btn {
+  html:not([dark]) .ytx-dl-main,
+  html:not([dark]) .ytx-dl-chevron {
     background: rgba(0, 0, 0, 0.05);
     border-color: rgba(0, 0, 0, 0.18);
     color: #0f0f0f;
   }
-
-  html:not([dark]) .ytx-download-btn:hover {
+  html:not([dark]) .ytx-dl-main:hover:not(:disabled),
+  html:not([dark]) .ytx-dl-chevron:hover:not(:disabled) {
     background: #cc0000;
     border-color: transparent;
     color: #fff;
+  }
+  html:not([dark]) .ytx-dl-menu {
+    background: #fff;
+    border-color: rgba(0, 0, 0, 0.12);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.15);
+  }
+  html:not([dark]) .ytx-dl-menu__item {
+    color: #0f0f0f;
+  }
+  html:not([dark]) .ytx-dl-menu__item:hover {
+    background: rgba(0, 0, 0, 0.06);
+  }
+  html:not([dark]) .ytx-dl-menu__sub {
+    color: rgba(0, 0, 0, 0.55);
   }
 }

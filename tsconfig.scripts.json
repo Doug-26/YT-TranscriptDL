@@ -7,6 +7,7 @@
   },
   "include": [
     "src/content/**/*.ts",
-    "src/background/**/*.ts"
+    "src/background/**/*.ts",
+    "src/shared/**/*.ts"
   ]
 }

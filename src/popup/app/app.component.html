@@ -41,26 +41,83 @@
     }
   </section>
 
-  <button
-    type="button"
-    class="popup__download"
-    (click)="download()"
-    [disabled]="state() !== 'ready' || busy()"
-  >
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M12 3v12"></path>
-      <path d="m7 10 5 5 5-5"></path>
-      <path d="M5 21h14"></path>
-    </svg>
-    <span>{{ busy() ? 'Downloading…' : 'Download transcript' }}</span>
-  </button>
+  <section class="popup__settings" aria-label="Summary settings">
+    <div class="popup__settings-row">
+      <span class="popup__settings-label">Format</span>
+      <div class="popup__chips" role="radiogroup" aria-label="Summary format">
+        @for (f of formats; track f) {
+          <button
+            type="button"
+            role="radio"
+            class="popup__chip"
+            [class.popup__chip--active]="format() === f"
+            [attr.aria-checked]="format() === f"
+            [disabled]="disabledSettings()"
+            (click)="setFormat(f)"
+          >{{ formatLabel(f) }}</button>
+        }
+      </div>
+    </div>
+
+    <div class="popup__settings-row">
+      <span class="popup__settings-label">Length</span>
+      <div class="popup__chips" role="radiogroup" aria-label="Summary length">
+        @for (l of lengths; track l) {
+          <button
+            type="button"
+            role="radio"
+            class="popup__chip"
+            [class.popup__chip--active]="length() === l"
+            [attr.aria-checked]="length() === l"
+            [disabled]="disabledSettings()"
+            (click)="setLength(l)"
+          >{{ lengthLabel(l) }}</button>
+        }
+      </div>
+    </div>
+
+    <div [class]="availabilityClass()">
+      <span class="popup__avail-dot"></span>
+      <span class="popup__avail-text">{{ availabilityText() }}</span>
+    </div>
+  </section>
+
+  <div class="popup__actions">
+    <button
+      type="button"
+      class="popup__btn popup__btn--primary"
+      (click)="download()"
+      [disabled]="state() !== 'ready' || busy()"
+    >
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 3v12"></path>
+        <path d="m7 10 5 5 5-5"></path>
+        <path d="M5 21h14"></path>
+      </svg>
+      <span>{{ busy() ? 'Working…' : 'Transcript' }}</span>
+    </button>
+
+    <button
+      type="button"
+      class="popup__btn popup__btn--secondary"
+      (click)="downloadSummary()"
+      [disabled]="state() !== 'ready' || busy() || availability() === 'unavailable'"
+    >
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 6h16"></path>
+        <path d="M4 12h10"></path>
+        <path d="M4 18h16"></path>
+      </svg>
+      <span>{{ busy() ? 'Working…' : 'Summary' }}</span>
+    </button>
+  </div>
 
   @if (toast(); as t) {
     <div class="popup__toast" [class.popup__toast--err]="t.kind === 'err'">{{ t.message }}</div>
   }
 
   <footer class="popup__footer">
-    <button type="button" class="popup__refresh" (click)="refreshStatus()">Refresh</button>
+    <button type="button" class="popup__refresh" (click)="refreshStatus(); refreshAvailability()">Refresh</button>
     <span class="popup__hint">.txt · no timestamps</span>
   </footer>
 </div>

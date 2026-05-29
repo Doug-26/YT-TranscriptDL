@@ -1,14 +1,25 @@
 /**
  * YouTube Transcript Downloader — content script.
  *
- * Watches for YouTube's transcript engagement panel, injects a Download
- * button into its header, and downloads the segment text as a clean .txt
- * file (no timestamps) when clicked. Also responds to messages from the
- * popup so the toolbar can trigger the same download.
+ * Watches for YouTube's transcript engagement panel, injects a compact
+ * split-button into its header, and exposes three actions via a dropdown
+ * menu:
+ *
+ *   • Download transcript  — clean .txt (no timestamps)
+ *   • Download summary     — on-device Summarizer API, .txt
+ *   • Download both        — both files
+ *
+ * Also responds to messages from the popup so the toolbar UI can trigger
+ * the same actions and listens for summarize-progress notifications so the
+ * button can reflect model-download progress.
  */
 
-const BUTTON_CLASS = 'ytx-download-btn';
-const BUTTON_ID = 'ytx-download-btn-instance';
+import { getSummarySettings } from '../shared/settings.js';
+
+// ─── Selectors & constants ───────────────────────────────────────────────
+
+const GROUP_ID = 'ytx-dl-group-instance';
+const GROUP_CLASS = 'ytx-dl-group';
 
 const TRANSCRIPT_PANEL_SELECTOR =
   'ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"]';
@@ -24,16 +35,18 @@ const TITLE_SELECTORS = [
 const ILLEGAL_FILENAME_CHARS = /[\\/:*?"<>|\x00-\x1F]+/g;
 
 const DOWNLOAD_ICON_SVG = `
-<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
   <path d="M12 3v12"></path>
   <path d="m7 10 5 5 5-5"></path>
   <path d="M5 21h14"></path>
 </svg>`.trim();
 
-interface TranscriptStatus {
-  detected: boolean;
-  videoTitle: string | null;
-}
+const CHEVRON_ICON_SVG = `
+<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <path d="m6 9 6 6 6-6"></path>
+</svg>`.trim();
+
+// ─── DOM helpers ─────────────────────────────────────────────────────────
 
 function getTranscriptPanel(): HTMLElement | null {
   return document.querySelector<HTMLElement>(TRANSCRIPT_PANEL_SELECTOR);
@@ -64,7 +77,6 @@ function sanitizeFilename(name: string): string {
 function extractTranscriptText(panel: HTMLElement): string {
   const segments = panel.querySelectorAll<HTMLElement>(SEGMENT_SELECTOR);
   if (segments.length === 0) return '';
-
   const lines: string[] = [];
   segments.forEach((segment) => {
     const textEl = segment.querySelector<HTMLElement>(SEGMENT_TEXT_SELECTOR);
@@ -87,110 +99,345 @@ function downloadBlob(filename: string, body: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-type DownloadResult =
-  | { ok: true; filename: string; segmentCount: number }
+// ─── Download flows ──────────────────────────────────────────────────────
+
+type TranscriptResult =
+  | { ok: true; filename: string; text: string }
   | { ok: false; reason: 'no-panel' | 'no-segments' };
 
-function performDownload(): DownloadResult {
+function gatherTranscript(): TranscriptResult {
   const panel = getTranscriptPanel();
   if (!panel || !isTranscriptPanelVisible(panel)) {
     return { ok: false, reason: 'no-panel' };
   }
   const text = extractTranscriptText(panel);
-  if (!text) {
-    return { ok: false, reason: 'no-segments' };
-  }
+  if (!text) return { ok: false, reason: 'no-segments' };
   const title = sanitizeFilename(getVideoTitle());
-  const filename = `${title}.txt`;
-  downloadBlob(filename, text);
-  return { ok: true, filename, segmentCount: text.split('\n').length };
+  return { ok: true, filename: `${title}.txt`, text };
 }
 
-function flashButton(button: HTMLButtonElement, message: string, ok: boolean): void {
-  const originalHTML = button.innerHTML;
-  button.innerHTML = `<span class="ytx-download-btn__label">${message}</span>`;
-  button.classList.toggle('ytx-download-btn--error', !ok);
-  button.classList.toggle('ytx-download-btn--success', ok);
-  button.disabled = true;
-  setTimeout(() => {
-    button.innerHTML = originalHTML;
-    button.classList.remove('ytx-download-btn--success', 'ytx-download-btn--error');
-    button.disabled = false;
-  }, 1600);
+function performTranscriptDownload(): TranscriptResult {
+  const r = gatherTranscript();
+  if (r.ok) downloadBlob(r.filename, r.text);
+  return r;
 }
 
-function buildButton(): HTMLButtonElement {
-  const button = document.createElement('button');
-  button.id = BUTTON_ID;
-  button.className = BUTTON_CLASS;
-  button.type = 'button';
-  button.setAttribute('aria-label', 'Download transcript as .txt');
-  button.title = 'Download transcript (.txt, no timestamps)';
-  button.innerHTML = `${DOWNLOAD_ICON_SVG}<span class="ytx-download-btn__label">Download</span>`;
+type SummarizeBackgroundResponse =
+  | { ok: true; summary: string }
+  | { ok: false; reason: 'unavailable' | 'download-failed' | 'summarize-failed'; detail?: string };
 
-  button.addEventListener('click', (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const result = performDownload();
-    if (result.ok) {
-      flashButton(button, 'Downloaded', true);
-    } else if (result.reason === 'no-segments') {
-      flashButton(button, 'No transcript', false);
-    } else {
-      flashButton(button, 'Open transcript', false);
+type SummaryResult =
+  | { ok: true; filename: string }
+  | {
+      ok: false;
+      reason: 'no-panel' | 'no-segments' | 'unavailable' | 'download-failed' | 'summarize-failed';
+    };
+
+async function performSummaryDownload(
+  onProgress?: (percent: number) => void,
+): Promise<SummaryResult> {
+  const t = gatherTranscript();
+  if (!t.ok) return t;
+
+  // Snapshot the title NOW so a mid-flight video change doesn't mislabel the file.
+  const titleBase = sanitizeFilename(getVideoTitle());
+
+  const progressHandler = (message: unknown) => {
+    if (
+      message &&
+      typeof message === 'object' &&
+      (message as { type?: string }).type === 'summarize-progress'
+    ) {
+      const loaded = (message as { loaded?: number }).loaded ?? 0;
+      onProgress?.(Math.round(loaded * 100));
     }
+  };
+  chrome.runtime.onMessage.addListener(progressHandler);
+
+  let response: SummarizeBackgroundResponse | undefined;
+  try {
+    response = (await chrome.runtime.sendMessage({
+      type: 'summarize-transcript',
+      text: t.text,
+    })) as SummarizeBackgroundResponse | undefined;
+  } catch {
+    response = { ok: false, reason: 'summarize-failed', detail: 'send-failed' };
+  } finally {
+    chrome.runtime.onMessage.removeListener(progressHandler);
+  }
+
+  if (!response || !response.ok) {
+    return { ok: false, reason: response?.reason ?? 'summarize-failed' };
+  }
+
+  const filename = `${titleBase} - summary.txt`;
+  downloadBlob(filename, response.summary);
+  return { ok: true, filename };
+}
+
+// ─── Button + menu UI ────────────────────────────────────────────────────
+
+interface SplitButton {
+  group: HTMLSpanElement;
+  main: HTMLButtonElement;
+  chevron: HTMLButtonElement;
+  menu: HTMLDivElement;
+  setLabel(label: string): void;
+  resetLabel(): void;
+  flash(message: string, ok: boolean, ms?: number): void;
+  setBusy(busy: boolean): void;
+}
+
+function buildSplitButton(): SplitButton {
+  const group = document.createElement('span');
+  group.id = GROUP_ID;
+  group.className = GROUP_CLASS;
+
+  const main = document.createElement('button');
+  main.type = 'button';
+  main.className = 'ytx-dl-main';
+  main.setAttribute('aria-label', 'Download transcript as .txt');
+  main.title = 'Download transcript (.txt, no timestamps)';
+  main.innerHTML = `${DOWNLOAD_ICON_SVG}<span class="ytx-dl-label">Download</span>`;
+
+  const chevron = document.createElement('button');
+  chevron.type = 'button';
+  chevron.className = 'ytx-dl-chevron';
+  chevron.setAttribute('aria-label', 'More download options');
+  chevron.setAttribute('aria-haspopup', 'menu');
+  chevron.setAttribute('aria-expanded', 'false');
+  chevron.title = 'More download options';
+  chevron.innerHTML = CHEVRON_ICON_SVG;
+
+  const menu = document.createElement('div');
+  menu.className = 'ytx-dl-menu';
+  menu.setAttribute('role', 'menu');
+  menu.hidden = true;
+
+  group.append(main, chevron, menu);
+
+  const defaultLabel = `${DOWNLOAD_ICON_SVG}<span class="ytx-dl-label">Download</span>`;
+
+  return {
+    group,
+    main,
+    chevron,
+    menu,
+    setLabel(label: string) {
+      main.innerHTML = `<span class="ytx-dl-label">${label}</span>`;
+    },
+    resetLabel() {
+      main.innerHTML = defaultLabel;
+    },
+    flash(message: string, ok: boolean, ms = 1600) {
+      const original = main.innerHTML;
+      main.innerHTML = `<span class="ytx-dl-label">${message}</span>`;
+      group.classList.toggle('ytx-dl-group--error', !ok);
+      group.classList.toggle('ytx-dl-group--success', ok);
+      main.disabled = true;
+      chevron.disabled = true;
+      setTimeout(() => {
+        main.innerHTML = original;
+        group.classList.remove('ytx-dl-group--success', 'ytx-dl-group--error');
+        main.disabled = false;
+        chevron.disabled = false;
+      }, ms);
+    },
+    setBusy(busy: boolean) {
+      main.disabled = busy;
+      chevron.disabled = busy;
+      group.classList.toggle('ytx-dl-group--busy', busy);
+    },
+  };
+}
+
+function buildMenuItem(label: string, sub: string, onClick: () => void): HTMLButtonElement {
+  const item = document.createElement('button');
+  item.type = 'button';
+  item.className = 'ytx-dl-menu__item';
+  item.setAttribute('role', 'menuitem');
+  item.innerHTML = `
+    <span class="ytx-dl-menu__label">${label}</span>
+    <span class="ytx-dl-menu__sub">${sub}</span>
+  `;
+  item.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onClick();
+  });
+  return item;
+}
+
+// ─── Action handlers wired to the split button ───────────────────────────
+
+function reasonMessage(reason: string): string {
+  switch (reason) {
+    case 'no-panel':
+      return 'Open transcript';
+    case 'no-segments':
+      return 'No transcript';
+    case 'unavailable':
+      return 'Summarizer N/A';
+    case 'download-failed':
+      return 'Model failed';
+    case 'summarize-failed':
+      return 'Summary failed';
+    default:
+      return 'Error';
+  }
+}
+
+function attachActions(btn: SplitButton): void {
+  // Open/close menu
+  const closeMenu = () => {
+    btn.menu.hidden = true;
+    btn.chevron.setAttribute('aria-expanded', 'false');
+  };
+  const openMenu = () => {
+    btn.menu.hidden = false;
+    btn.chevron.setAttribute('aria-expanded', 'true');
+  };
+
+  btn.chevron.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    btn.menu.hidden ? openMenu() : closeMenu();
   });
 
-  return button;
+  // Close on outside click / Escape
+  document.addEventListener('click', (e) => {
+    if (btn.menu.hidden) return;
+    if (!btn.group.contains(e.target as Node)) closeMenu();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !btn.menu.hidden) closeMenu();
+  });
+
+  // Main face → transcript download
+  btn.main.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const r = performTranscriptDownload();
+    btn.flash(r.ok ? 'Downloaded' : reasonMessage(r.reason), r.ok);
+  });
+
+  // Menu items
+  const onSummary = async () => {
+    closeMenu();
+    btn.setBusy(true);
+    btn.setLabel('Summarizing…');
+    const r = await performSummaryDownload((pct) => {
+      btn.setLabel(`Downloading model ${pct}%`);
+    });
+    btn.setBusy(false);
+    btn.resetLabel();
+    btn.flash(r.ok ? 'Summary saved' : reasonMessage(r.reason), r.ok, r.ok ? 1600 : 2400);
+  };
+
+  const onTranscript = () => {
+    closeMenu();
+    const r = performTranscriptDownload();
+    btn.flash(r.ok ? 'Downloaded' : reasonMessage(r.reason), r.ok);
+  };
+
+  const onBoth = async () => {
+    closeMenu();
+    // Fire transcript first (instant), then run the summary path.
+    const tr = performTranscriptDownload();
+    if (!tr.ok) {
+      btn.flash(reasonMessage(tr.reason), false);
+      return;
+    }
+    btn.setBusy(true);
+    btn.setLabel('Summarizing…');
+    const sr = await performSummaryDownload((pct) => {
+      btn.setLabel(`Downloading model ${pct}%`);
+    });
+    btn.setBusy(false);
+    btn.resetLabel();
+    btn.flash(sr.ok ? 'Both saved' : reasonMessage(sr.reason), sr.ok, sr.ok ? 1600 : 2400);
+  };
+
+  btn.menu.append(
+    buildMenuItem('Download transcript', '.txt · full text', onTranscript),
+    buildMenuItem('Download summary', '.txt · AI summary', onSummary),
+    buildMenuItem('Download both', 'transcript + summary', onBoth),
+  );
 }
+
+// ─── Injection ───────────────────────────────────────────────────────────
 
 interface InsertionPoint {
   container: HTMLElement;
   before: HTMLElement | null;
 }
 
+/**
+ * The transcript panel header is roughly:
+ *   #header
+ *     #title-container  (title text, flex: 1)
+ *     #menu-container   (3-dot kebab)
+ *     #visibility-button (X close)
+ *
+ * We insert immediately BEFORE the kebab so the visual order becomes:
+ *   [Transcript title] … [Download ▾] [kebab] [×]
+ *
+ * That keeps the button on the same flex row, doesn't push the kebab to wrap
+ * to a new line, and stays away from the auto-margin space the close button
+ * relies on.
+ */
 function findHeaderInsertionPoint(panel: HTMLElement): InsertionPoint | null {
-  const headerRenderer =
-    panel.querySelector<HTMLElement>('ytd-engagement-panel-title-header-renderer');
+  const headerRenderer = panel.querySelector<HTMLElement>(
+    'ytd-engagement-panel-title-header-renderer',
+  );
   const header =
     headerRenderer?.querySelector<HTMLElement>('#header') ??
     panel.querySelector<HTMLElement>('ytd-engagement-panel-title-header-renderer #header') ??
     headerRenderer;
   if (!header) return null;
 
-  const closeButton =
+  const beforeCandidate =
+    header.querySelector<HTMLElement>('#menu-container') ??
+    header.querySelector<HTMLElement>('ytd-menu-renderer') ??
     header.querySelector<HTMLElement>('#visibility-button') ??
-    header.querySelector<HTMLElement>('yt-button-shape:last-of-type') ??
-    null;
-  return { container: header, before: closeButton };
+    header.querySelector<HTMLElement>('yt-button-shape:last-of-type');
+
+  // Make sure the candidate is actually a direct child of the header so
+  // insertBefore is well-defined.
+  let before: HTMLElement | null = beforeCandidate;
+  while (before && before.parentElement !== header) {
+    before = before.parentElement;
+  }
+  return { container: header, before };
 }
 
 function ensureButtonInjected(): void {
   const panel = getTranscriptPanel();
   if (!panel || !isTranscriptPanelVisible(panel)) {
-    document.getElementById(BUTTON_ID)?.remove();
+    document.getElementById(GROUP_ID)?.remove();
     return;
   }
-
-  if (document.getElementById(BUTTON_ID)) return;
+  if (document.getElementById(GROUP_ID)) return;
 
   const point = findHeaderInsertionPoint(panel);
   if (!point) return;
 
-  const button = buildButton();
+  const btn = buildSplitButton();
+  attachActions(btn);
+
   if (point.before && point.before.parentElement === point.container) {
-    point.container.insertBefore(button, point.before);
+    point.container.insertBefore(btn.group, point.before);
   } else {
-    point.container.appendChild(button);
+    point.container.appendChild(btn.group);
   }
 }
 
-let observerScheduled = false;
+let scheduled = false;
 function scheduleEnsure(): void {
-  if (observerScheduled) return;
-  observerScheduled = true;
+  if (scheduled) return;
+  scheduled = true;
   requestAnimationFrame(() => {
-    observerScheduled = false;
+    scheduled = false;
     ensureButtonInjected();
   });
 }
@@ -204,10 +451,16 @@ document.addEventListener('yt-navigate-finish', () => {
 
 scheduleEnsure();
 
+// ─── Popup ↔ content message router ──────────────────────────────────────
+
 function isWatchPage(): boolean {
   return location.pathname === '/watch';
 }
 
+interface TranscriptStatus {
+  detected: boolean;
+  videoTitle: string | null;
+}
 function buildStatus(): TranscriptStatus {
   const panel = getTranscriptPanel();
   const detected = isWatchPage() && isTranscriptPanelVisible(panel);
@@ -219,14 +472,30 @@ function buildStatus(): TranscriptStatus {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || typeof message !== 'object') return false;
+
   if (message.type === 'transcript-status?') {
     sendResponse(buildStatus());
     return false;
   }
   if (message.type === 'download-transcript') {
-    const result = performDownload();
-    sendResponse(result);
+    const r = performTranscriptDownload();
+    if (r.ok) {
+      sendResponse({ ok: true, filename: r.filename, segmentCount: r.text.split('\n').length });
+    } else {
+      sendResponse({ ok: false, reason: r.reason });
+    }
     return false;
   }
+  if (message.type === 'download-summary') {
+    // Surface a small in-page hint via getSummarySettings so the user sees the
+    // current settings being applied (used for logs / future overlay).
+    void getSummarySettings();
+    performSummaryDownload().then((r) => {
+      if (r.ok) sendResponse({ ok: true, filename: r.filename });
+      else sendResponse({ ok: false, reason: r.reason });
+    });
+    return true; // async response
+  }
+
   return false;
 });

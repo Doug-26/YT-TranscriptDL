@@ -32,5 +32,6 @@
       "all_frames": false
     }
   ],
+  "permissions": ["storage"],
   "host_permissions": ["https://www.youtube.com/*"]
 }

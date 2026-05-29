@@ -8,6 +8,7 @@
     "src/popup/main.ts"
   ],
   "include": [
-    "src/popup/**/*.ts"
+    "src/popup/**/*.ts",
+    "src/shared/**/*.ts"
   ]
 }
